@@ -1,0 +1,100 @@
+sources:
+  - id: indian_express_india
+    name: The Indian Express - India
+    country: IN
+    category: news
+    rss_urls:
+      - https://indianexpress.com/section/india/feed/
+    enabled: true
+    fetch_interval_minutes: 30
+    trust_rank: 1
+
+  - id: hindustan_times_top
+    name: Hindustan Times - Top News
+    country: IN
+    category: news
+    rss_urls:
+      - https://www.hindustantimes.com/feeds/rss/latest/rssfeed.xml
+    enabled: true
+    fetch_interval_minutes: 30
+    trust_rank: 1
+
+  - id: times_of_india_top
+    name: Times of India - Top Stories
+    country: IN
+    category: news
+    rss_urls:
+      - https://timesofindia.indiatimes.com/rssfeedstopstories.cms
+    enabled: true
+    fetch_interval_minutes: 30
+    trust_rank: 1
+
+  - id: ndtv_top
+    name: NDTV - Top Stories
+    country: IN
+    category: news
+    rss_urls:
+      - https://feeds.feedburner.com/ndtvnews-top-stories
+    enabled: true
+    fetch_interval_minutes: 30
+    trust_rank: 1
+
+  - id: livemint_news
+    name: Livemint - News
+    country: IN
+    category: news
+    rss_urls:
+      - https://www.livemint.com/rss/news
+    enabled: true
+    fetch_interval_minutes: 30
+    trust_rank: 1
+
+  - id: bbc_world
+    name: BBC - World
+    country: GB
+    category: news
+    rss_urls:
+      - https://feeds.bbci.co.uk/news/world/rss.xml
+    enabled: true
+    fetch_interval_minutes: 30
+    trust_rank: 1
+
+  - id: guardian_world
+    name: The Guardian - World
+    country: GB
+    category: news
+    rss_urls:
+      - https://www.theguardian.com/world/rss
+    enabled: true
+    fetch_interval_minutes: 30
+    trust_rank: 1
+
+  - id: aljazeera_all
+    name: Al Jazeera - All
+    country: QA
+    category: news
+    rss_urls:
+      - https://www.aljazeera.com/xml/rss/all.xml
+    enabled: true
+    fetch_interval_minutes: 30
+    trust_rank: 1
+
+  - id: npr_news
+    name: NPR - News
+    country: US
+    category: news
+    rss_urls:
+      - https://feeds.npr.org/1001/rss.xml
+    enabled: true
+    fetch_interval_minutes: 30
+    trust_rank: 1
+
+  - id: france24_english
+    name: France24 - English
+    country: FR
+    category: news
+    rss_urls:
+      - https://www.france24.com/en/rss
+    enabled: true
+    fetch_interval_minutes: 30
+    trust_rank: 1
