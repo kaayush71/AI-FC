@@ -79,7 +79,11 @@ def run_extract_articles(store: SqliteStore, limit: int | None = None) -> dict[s
             store.update_rss_status(item_id, "extracted")
             stats["extracted"] += 1
         except Exception as exc:
-            logger.exception("Failed to extract article from url=%s", url)
+            message = str(exc)
+            if "403 Client Error" in message:
+                logger.warning("Access denied (403) during article extraction for url=%s", url)
+            else:
+                logger.exception("Failed to extract article from url=%s", url)
             store.update_rss_status(item_id, "failed", error=str(exc))
             stats["failed"] += 1
 
