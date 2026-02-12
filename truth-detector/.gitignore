@@ -1,0 +1,11 @@
+.venv/
+build/
+*.egg-info/
+__pycache__/
+*.pyc
+
+# Local runtime artifacts
+data/news.db
+data/*.db-*
+data/chroma/
+!data/.gitkeep

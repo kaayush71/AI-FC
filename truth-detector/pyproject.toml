@@ -1,0 +1,28 @@
+[project]
+name = "truth-detector"
+version = "0.1.0"
+description = "Truth Detector ingestion pipeline"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "PyYAML>=6.0",
+  "beautifulsoup4>=4.12",
+  "chromadb>=0.5",
+  "feedparser>=6.0",
+  "openai>=1.0.0",
+  "onnxruntime==1.23.2",
+  "requests>=2.32.0",
+]
+
+[project.scripts]
+truth-news = "app.cli:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["app", "app.common", "app.config", "app.ingest", "app.store"]
+
+[tool.poetry]
+packages = [{ include = "app" }]
