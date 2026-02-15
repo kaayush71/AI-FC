@@ -28,3 +28,19 @@ class ChromaStore:
             metadatas=metadatas,
             embeddings=embeddings,
         )
+
+    def query(
+        self,
+        query_embedding: list[float],
+        n_results: int = 10,
+    ) -> dict[str, Any]:
+        """Query the collection for similar documents by embedding vector."""
+        return self.collection.query(
+            query_embeddings=[query_embedding],
+            n_results=n_results,
+            include=["documents", "metadatas", "distances"],
+        )
+
+    def count(self) -> int:
+        """Return the number of documents in the collection."""
+        return self.collection.count()

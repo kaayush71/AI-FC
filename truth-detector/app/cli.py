@@ -27,6 +27,107 @@ def default_chroma_path() -> str:
     return str(project_root() / "data" / "chroma")
 
 
+def _run_verify(args: argparse.Namespace) -> None:
+    """Run the verify command to fact-check claims using two-pass verification."""
+    import sys
+
+    from app.verify.analyze import Verdict, verify_claim
+    from app.verify.output import format_result, format_result_compact
+    from app.verify.retrieve import retrieve_evidence
+    from app.verify.search import search_and_cache
+
+    # Confidence threshold for triggering external search
+    CONFIDENCE_THRESHOLD = 60
+
+    # Collect claims to verify
+    claims: list[str] = []
+
+    if args.file:
+        try:
+            with open(args.file, "r") as f:
+                claims = [line.strip() for line in f if line.strip()]
+        except FileNotFoundError:
+            print(f"Error: File not found: {args.file}", file=sys.stderr)
+            sys.exit(1)
+    elif args.claim:
+        claims = [args.claim]
+    else:
+        print("Error: Provide a claim or use --file", file=sys.stderr)
+        sys.exit(1)
+
+    use_color = not args.no_color and sys.stdout.isatty()
+
+    for claim in claims:
+        # Step 1: Retrieve evidence from ChromaDB (internal sources)
+        evidence = retrieve_evidence(
+            claim=claim,
+            chroma_dir=args.chroma_dir,
+            collection_name=args.collection_name,
+            n_results=args.top_k,
+            model_name=args.embedding_model,
+            api_key=args.openai_api_key,
+            base_url=args.openai_base_url,
+        )
+
+        # Step 2: First-pass verification with internal evidence only
+        first_pass_result = verify_claim(
+            claim=claim,
+            evidence=evidence,
+            api_key=args.openai_api_key,
+            base_url=args.openai_base_url,
+            model=args.verification_model,
+        )
+
+        # Step 3: Check if we need external search
+        needs_external = (
+            not args.no_external
+            and (
+                first_pass_result.verdict == Verdict.UNVERIFIABLE
+                or first_pass_result.confidence < CONFIDENCE_THRESHOLD
+            )
+        )
+
+        if needs_external:
+            print(f"First pass: {first_pass_result.verdict.value} ({first_pass_result.confidence}%) - searching external sources...")
+
+            # Step 4: Search Tavily and cache results to ChromaDB
+            external_evidence = search_and_cache(
+                claim=claim,
+                chroma_dir=args.chroma_dir,
+                collection_name=args.collection_name,
+                max_results=5,
+                tavily_api_key=args.tavily_api_key,
+                openai_api_key=args.openai_api_key,
+                openai_base_url=args.openai_base_url,
+                embedding_model=args.embedding_model,
+            )
+
+            if external_evidence:
+                # Step 5: Second-pass verification with combined evidence
+                combined_evidence = evidence + external_evidence
+                result = verify_claim(
+                    claim=claim,
+                    evidence=combined_evidence,
+                    api_key=args.openai_api_key,
+                    base_url=args.openai_base_url,
+                    model=args.verification_model,
+                )
+            else:
+                # No external results found, use first pass result
+                result = first_pass_result
+        else:
+            # First pass was sufficient
+            result = first_pass_result
+
+        # Step 6: Output result
+        if args.compact:
+            print(format_result_compact(result, use_color=use_color))
+        else:
+            print(format_result(result, use_color=use_color))
+            if len(claims) > 1:
+                print()  # Blank line between multiple claims
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="truth-news")
     parser.add_argument("--db-path", default=default_db_path())
@@ -66,7 +167,25 @@ def main() -> None:
         help="Confirm destructive reset operation.",
     )
 
+    # Verify command for fact-checking claims
+    verify_parser = subparsers.add_parser("verify", help="Verify a claim using RAG + external search")
+    verify_parser.add_argument("claim", nargs="?", help="The claim to verify")
+    verify_parser.add_argument("--file", "-f", help="File with claims (one per line)")
+    verify_parser.add_argument("--no-external", action="store_true", help="Disable external Tavily search")
+    verify_parser.add_argument("--top-k", type=int, default=10, help="Number of evidence chunks to retrieve")
+    verify_parser.add_argument("--embedding-model", default="text-embedding-3-small")
+    verify_parser.add_argument("--verification-model", default="gpt-4o", help="Model for verification")
+    verify_parser.add_argument("--openai-api-key", default=os.getenv("OPENAI_API_KEY"))
+    verify_parser.add_argument("--openai-base-url", default=os.getenv("OPENAI_BASE_URL"))
+    verify_parser.add_argument("--tavily-api-key", default=os.getenv("TAVILY_API_KEY"))
+    verify_parser.add_argument("--compact", action="store_true", help="Compact single-line output")
+    verify_parser.add_argument("--no-color", action="store_true", help="Disable colored output")
+
     args = parser.parse_args()
+
+    if args.command == "verify":
+        _run_verify(args)
+        return
 
     if args.command == "reset":
         if not args.yes:
