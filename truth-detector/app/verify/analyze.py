@@ -43,30 +43,50 @@ class VerificationResult:
     internal_sources: int = 0  # From ChromaDB/ingested news
     external_sources: int = 0  # From Tavily
     used_external_search: bool = False  # Whether Tavily was triggered
+    # Agentic decision fields - LLM decides if external search is needed
+    needs_external_search: bool = False
+    search_rationale: str = ""
+    suggested_search_query: str = ""
 
 
-VERIFICATION_SYSTEM_PROMPT = """You are a rigorous fact-checker. Your job is to verify claims against provided evidence.
+VERIFICATION_SYSTEM_PROMPT = """You are a rigorous fact-checker. Your job is to verify claims against provided evidence AND decide if external search is needed.
 
 Analyze the claim carefully against each piece of evidence. Consider:
 1. Does the evidence directly support or contradict the claim?
-2. Is the evidence from a credible source?
+2. Is the evidence from a credible, recent source?
 3. Are there any nuances or partial truths?
+4. Are there gaps in the evidence that external search could fill?
 
 Output valid JSON with these exact fields:
 - verdict: one of "TRUE", "FALSE", "PARTIALLY_TRUE", "UNVERIFIABLE"
 - confidence: integer 0-100 representing your confidence in the verdict
 - reasoning: 2-3 sentence explanation of your verdict
+- needs_external_search: boolean - true if external search would likely improve confidence
+- search_rationale: explain WHY external search is/isn't needed (required if needs_external_search is true)
+- suggested_search_query: if needs_external_search is true, provide an optimized search query
 - supporting: array of objects with {index, source, snippet} for evidence that supports the claim
   - index: the evidence number (e.g., 1, 2, 3) from the provided evidence list
   - source: the source name
   - snippet: a brief relevant quote
 - contradicting: array of objects with {index, source, snippet} for evidence that contradicts the claim
 
-Guidelines:
+Verdict Guidelines:
 - TRUE: Evidence clearly confirms the claim
 - FALSE: Evidence clearly contradicts the claim
 - PARTIALLY_TRUE: Some aspects are true, others are false or unverified
 - UNVERIFIABLE: Insufficient evidence to make a determination
+
+When to recommend external search (needs_external_search: true):
+- Evidence is outdated relative to claim timeframe (claim involves recent events but sources are old)
+- Evidence is sparse or only tangentially related to the claim
+- Verdict is UNVERIFIABLE or confidence is below 60%
+- Claim involves specific facts, numbers, or events not found in internal sources
+
+When NOT to recommend external search (needs_external_search: false):
+- You already have HIGH confidence (>80%) with clear supporting or contradicting evidence
+- Multiple corroborating internal sources confirm or deny the claim
+- External search is unlikely to find better evidence than what's already available
+- The claim is clearly verifiable from the provided evidence
 
 Be objective and cite specific evidence in your reasoning. Always include the evidence index number."""
 
@@ -151,6 +171,9 @@ def verify_claim(
             internal_sources=0,
             external_sources=0,
             used_external_search=False,
+            needs_external_search=True,  # No internal evidence - external search recommended
+            search_rationale="No relevant internal evidence found; external search is recommended.",
+            suggested_search_query="",
         )
 
     # Format evidence for prompt
@@ -219,6 +242,10 @@ def verify_claim(
             internal_sources=internal_count,
             external_sources=external_count,
             used_external_search=external_count > 0,
+            # Parse agentic decision fields from LLM response
+            needs_external_search=bool(data.get("needs_external_search", False)),
+            search_rationale=data.get("search_rationale", ""),
+            suggested_search_query=data.get("suggested_search_query", ""),
         )
 
     except json.JSONDecodeError as e:
@@ -231,6 +258,9 @@ def verify_claim(
             internal_sources=internal_count,
             external_sources=external_count,
             used_external_search=external_count > 0,
+            needs_external_search=True,  # Default to trying external on parse failure
+            search_rationale="Verification response parsing failed; external search may help.",
+            suggested_search_query="",
         )
     except Exception as e:
         return VerificationResult(
@@ -242,4 +272,7 @@ def verify_claim(
             internal_sources=internal_count,
             external_sources=external_count,
             used_external_search=external_count > 0,
+            needs_external_search=True,  # Default to trying external on failure
+            search_rationale="Verification failed; external search may help.",
+            suggested_search_query="",
         )
