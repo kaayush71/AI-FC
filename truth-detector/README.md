@@ -1,374 +1,338 @@
-# Truth Detector Ingestion Pipeline
+# AI-FC: Truth Detector
 
-This project implements the ingestion pipeline for the Truth Detector hackathon:
+An intelligent fact-checking system that uses Agentic RAG (Retrieval-Augmented Generation) to verify claims against a curated database of news articles and external sources.
 
-- fetches curated news RSS feeds
-- extracts article text
-- cleans and normalizes text
-- deduplicates content
-- chunks text for retrieval
-- generates embeddings
-- indexes chunks into Chroma
-- stores metadata/state in SQLite for resumable ingestion
+## Overview
 
-## 1) Prerequisites
+Truth Detector is a two-pipeline system designed for automated claim verification:
 
-- macOS/Linux shell
+1. **Data Ingestion Pipeline**: Continuously fetches, processes, and indexes news articles from trusted sources into a vector database
+2. **Agentic RAG Verification Pipeline**: Uses AI agents to intelligently verify user claims through multi-stage reasoning and evidence retrieval
+
+## Key Features
+
+### 🤖 Agentic Intelligence
+- **Query Enhancement Agent**: Automatically detects ambiguous claims and prompts for clarification
+- **Smart External Search**: LLM-driven decision-making for when to search external sources
+- **Multi-Query Retrieval**: Generates and searches multiple query variations for comprehensive evidence gathering
+- **Two-Pass Verification**: First checks internal database, then conditionally searches external sources
+
+### 📰 Comprehensive News Coverage
+- Multi-source ingestion from trusted news outlets (BBC, Guardian, Al Jazeera, Indian Express, etc.)
+- Automated RSS feed fetching and article extraction
+- Deduplication and metadata enrichment
+- Vector-based semantic search using ChromaDB
+
+### 🎯 Flexible Verification
+- Command-line interface for quick claim verification
+- Batch processing support for multiple claims
+- Configurable verification parameters (models, thresholds, external search)
+- Detailed output with evidence, confidence scores, and source citations
+
+## Quick Start
+
+### Prerequisites
+
+- macOS/Linux
 - Python 3.10+
-- internet access (for RSS/article fetch)
-- OpenAI API key for embedding generation
+- OpenAI API key (for embeddings and verification)
+- Tavily API key (optional, for external search)
 
-## 2) Project structure
-
-```text
-truth-detector/
-  app/
-    cli.py
-    config/
-      sources.yaml
-      loader.py
-    common/
-      http.py
-      hashing.py
-      logging.py
-      time.py
-    ingest/
-      fetch_rss.py
-      extract_article.py
-      clean.py
-      dedupe.py
-      chunk.py
-      embed.py
-      index.py
-    store/
-      sqlite.py
-      chroma.py
-  data/
-    news.db
-    chroma/
-```
-
-## 3) Setup and install
-
-From project root:
+### Installation
 
 ```bash
-cd /Users/aayushkumar/AI-FC/truth-detector
+cd truth-detector
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip setuptools wheel
-python -m pip install . -i https://pypi.org/simple
+pip install --upgrade pip setuptools wheel
+pip install .
 ```
 
-Note:
-- use `pip install .` (not editable mode) for this repo setup
-- if your environment has private index overrides, use `-i https://pypi.org/simple`
-
-## 3.1) OpenAI token setup (required)
-
-Embedding stage uses OpenAI API, so token setup is mandatory.
+### Setup API Keys
 
 ```bash
-cd /Users/aayushkumar/AI-FC/truth-detector
-source .venv/bin/activate
 export OPENAI_API_KEY="sk-..."
+export TAVILY_API_KEY="tvly-..."  # Optional for external search
 ```
 
-Quick verification:
+### Ingest News Data
 
 ```bash
-python - <<'PY'
-import os
-print("OPENAI_API_KEY set:", bool(os.getenv("OPENAI_API_KEY")))
-PY
+# Fetch recent articles (last 60 minutes)
+truth-news ingest --since-minutes 60
+
+# Backfill older articles (last 7 days)
+truth-news backfill --days 7
+
+# Check ingestion health
+truth-news health
 ```
 
-Alternative (without env var), pass key in command:
+### Verify Claims
 
 ```bash
-news ingest --since-minutes 60 --openai-api-key "sk-..."
+# Simple verification
+truth-news verify "Elon Musk announced Tesla's new factory in India"
+
+# Verify without external search
+truth-news verify --no-external "Tesla stock dropped 10% yesterday"
+
+# Verify with raw claim (skip enhancement)
+truth-news verify --no-enhance "Biden announced new AI regulations"
+
+# Batch verify from file
+truth-news verify --file claims.txt
+
+# Compact output (single line per claim)
+truth-news verify --compact "Some claim to verify"
 ```
 
-If token is missing, embedding stage will fail fast with:
-- `OPENAI_API_KEY is required to generate OpenAI embeddings.`
+## Architecture
 
-## 4) Source configuration
+### Data Flow
 
-Sources are configured in:
+```
+News Sources → Fetch → Clean → Chunk → Embed → ChromaDB
+                                                    ↓
+User Claim → Query Enhancement → Multi-Query Retrieval
+                                        ↓
+                              First-Pass Verification
+                                        ↓
+                    ┌──────────────────┴──────────────────┐
+                    ↓                                     ↓
+            needs_external: false               needs_external: true
+                    ↓                                     ↓
+              Final Result ←───── Tavily Search + Re-verify
+```
 
-- `/Users/aayushkumar/AI-FC/truth-detector/app/config/sources.yaml`
+### Key Components
 
-Each source entry includes:
+**Ingestion Pipeline** (`app/ingest/`)
+- `fetch_rss.py`: RSS feed fetching
+- `extract_article.py`: Article text extraction (Trafilatura)
+- `clean.py`: Text normalization
+- `dedupe.py`: Content deduplication via SHA256
+- `chunk.py`: Token-based chunking (300-500 tokens)
+- `embed.py`: OpenAI embedding generation
+- `index.py`: ChromaDB vector indexing
 
-- `id`
-- `name`
-- `country`
-- `category`
-- `rss_urls`
-- `enabled`
-- `fetch_interval_minutes`
-- `trust_rank`
+**Verification Pipeline** (`app/verify/`)
+- `enhance.py`: Query Enhancement Agent (ambiguity detection, multi-query generation)
+- `retrieve.py`: Multi-query evidence retrieval from ChromaDB
+- `analyze.py`: Verification Agent with agentic external search decision
+- `search.py`: Tavily external search and result caching
+- `output.py`: Result formatting with colored CLI output
 
-To add a source: add a new YAML entry.  
-To disable a source temporarily: set `enabled: false`.
+**Storage** (`app/store/`)
+- `sqlite.py`: SQLite for ingestion state and metadata
+- `chroma.py`: ChromaDB vector database for semantic search
 
-## 5) How ingestion works (stage-by-stage)
+## Project Structure
 
-For each run:
+```
+AI-FC/
+├── truth-detector/
+│   ├── app/
+│   │   ├── cli.py              # Main CLI entry point
+│   │   ├── config/
+│   │   │   ├── sources.yaml    # RSS source configuration
+│   │   │   └── loader.py       # Config loader
+│   │   ├── common/             # Shared utilities
+│   │   ├── ingest/             # Data ingestion pipeline
+│   │   ├── verify/             # Claim verification pipeline
+│   │   └── store/              # Database interfaces
+│   ├── data/
+│   │   ├── news.db             # SQLite database
+│   │   └── chroma/             # ChromaDB vector store
+│   ├── pyproject.toml
+│   └── README.md
+└── README.md                   # This file
+```
 
-1. **Fetch RSS**  
-   Pulls RSS feeds and upserts items into `rss_items` as `queued`.
+## CLI Commands Reference
 
-2. **Extract articles**  
-   Fetches each queued URL and extracts main text into `articles`.
-
-3. **Clean + normalize**  
-   Normalizes quotes/dashes/whitespace deterministically.
-
-4. **Dedupe**  
-   Uses SHA256 `text_hash`; duplicates are linked via `duplicate_of_url`.
-
-5. **Chunk**  
-   Token-based chunking (default target 420, overlap 60), stored in `chunks`.
-
-6. **Embed**  
-   Calls OpenAI Embeddings API (default model: `text-embedding-3-small`) and stores vectors + model metadata.
-
-7. **Index**  
-   Upserts chunks into Chroma collection (default: `news_v1`).
-
-## 6) CLI commands
-
-Primary CLI command:
-- `news`
-
-Activate env first:
+### Ingestion
 
 ```bash
-cd /Users/aayushkumar/AI-FC/truth-detector
-source .venv/bin/activate
-export OPENAI_API_KEY="sk-..."
+# Ingest recent articles
+truth-news ingest --since-minutes <MINUTES>
+
+# Options:
+#   --limit-queued <N>           Limit articles to process
+#   --skip-index                 Skip ChromaDB indexing
+#   --embedding-model <MODEL>    Embedding model (default: text-embedding-3-small)
+#   --embedding-dimensions <N>   Vector dimensions
+#   --collection-name <NAME>     ChromaDB collection name
+
+# Backfill older articles
+truth-news backfill --days <N>
+
+# Check source health
+truth-news health
+
+# Reset data
+truth-news reset --full --yes           # Full reset (SQLite + ChromaDB)
+truth-news reset --chunks-only --yes    # Reset chunks only (keep articles)
 ```
 
-### Ingest recent items
+### Verification
 
 ```bash
-news ingest --since-minutes 60
+# Verify a single claim
+truth-news verify "CLAIM TEXT"
+truth-news verify --file claims.txt     # Batch verify
+
+# Options:
+#   --no-enhance                 Skip query enhancement
+#   --no-external                Disable external search
+#   --top-k <N>                  Number of evidence chunks (default: 10)
+#   --embedding-model <MODEL>    Embedding model
+#   --verification-model <MODEL> LLM for verification (default: gpt-4o)
+#   --compact                    Compact single-line output
+#   --no-color                   Disable colored output
 ```
 
-Useful options:
+## Configuration
+
+### News Sources
+
+Edit `truth-detector/app/config/sources.yaml` to add or configure news sources:
+
+```yaml
+sources:
+  - id: source_identifier
+    name: Source Display Name
+    country: US
+    category: news
+    rss_urls:
+      - https://example.com/rss
+    enabled: true
+    fetch_interval_minutes: 30
+    trust_rank: 1  # 1-10, higher is more trusted
+```
+
+### Environment Variables
+
+- `OPENAI_API_KEY`: Required for embeddings and verification
+- `OPENAI_BASE_URL`: Optional OpenAI-compatible API endpoint
+- `TAVILY_API_KEY`: Required for external search (optional feature)
+
+## Data Storage
+
+### SQLite (`data/news.db`)
+- **sources**: Source configurations and health status
+- **rss_items**: Feed-level ingestion queue
+- **articles**: Extracted article text and metadata
+- **chunks**: Text chunks with embeddings
+- **indexed_chunks**: Index tracking
+
+### ChromaDB (`data/chroma`)
+- Collection: `news_openai_v1` (default)
+- Stores: chunk text, embeddings, metadata (URL, source, date, etc.)
+- Used for: semantic similarity search during verification
+
+## Examples
+
+### Basic Claim Verification
 
 ```bash
-news ingest --since-minutes 30 --limit-queued 50
-news ingest --since-minutes 60 --skip-index
-news ingest --since-minutes 60 --embedding-model text-embedding-3-large
-news ingest --since-minutes 60 --embedding-model text-embedding-3-small --embedding-dimensions 1024
-news ingest --since-minutes 60 --collection-name news_v2
+$ truth-news verify "Tesla announced a new Gigafactory in India"
+
+Query enhanced: "Tesla Gigafactory India announcement"
+
+Verdict: TRUE (85% confidence)
+
+Reasoning:
+Multiple credible sources confirm Tesla's announcement of a new Gigafactory 
+in India scheduled for 2026, with an investment of $3 billion.
+
+Supporting Evidence:
+  [1] The Indian Express (2026-02-15): "Tesla CEO Elon Musk announced..."
+      https://indianexpress.com/article/...
+  
+  [2] BBC World (2026-02-14): "Electric car maker Tesla confirms..."
+      https://bbc.co.uk/news/...
+
+Contradicting Evidence: None
 ```
 
-### Backfill older items
+### Ambiguous Claim with Clarification
 
 ```bash
-news backfill --days 7
+$ truth-news verify "The president announced new tariffs"
+
+Query Enhancement Agent detected ambiguity:
+  Original: "The president announced new tariffs"
+  Issue: Which country's president?
+
+Please select the intended context:
+  [1] US President (Joe Biden)
+  [2] Chinese President (Xi Jinping)
+  [3] French President (Emmanuel Macron)
+  [4] Keep original (search as-is)
+  [5] Custom: Enter your own clarification
+
+Your choice [1-5]: 1
+
+Query enhanced: "US President Joe Biden tariffs announcement"
+...
 ```
 
-With OpenAI-compatible base URL (optional):
+## Development
+
+### Adding New News Sources
+
+1. Edit `app/config/sources.yaml`
+2. Add source configuration with RSS URLs
+3. Run ingestion: `truth-news ingest --since-minutes 60`
+
+### Customizing Verification Logic
+
+- **Query Enhancement**: Edit `app/verify/enhance.py` → `ENHANCEMENT_SYSTEM_PROMPT`
+- **Verification Prompts**: Edit `app/verify/analyze.py` → system prompts
+- **Search Integration**: Edit `app/verify/search.py`
+
+### Debugging
 
 ```bash
-news ingest --since-minutes 60 --openai-base-url https://api.openai.com/v1
+# Check ingestion status
+truth-news health
+
+# Inspect database
+sqlite3 data/news.db "SELECT COUNT(*) FROM articles;"
+sqlite3 data/news.db "SELECT * FROM chunks LIMIT 5;"
+
+# Check ChromaDB
+python -c "import chromadb; print(chromadb.PersistentClient('data/chroma').get_collection('news_openai_v1').count())"
 ```
 
-### Health check
+## Documentation
 
-```bash
-news health
-```
+- [Full README](truth-detector/README.md) - Detailed ingestion pipeline documentation
+- [Design Document](DESIGN.md) - Architecture and system design
+- [Design Diagrams](truth-detector/design-diagram.md) - Mermaid diagrams of data flow
 
-Shows, per source:
-- total items
-- queued/extracted/failed counts
-- last success and last error
+## Tech Stack
 
-### Reset commands
+- **Language**: Python 3.10+
+- **Vector Database**: ChromaDB
+- **Metadata Store**: SQLite
+- **LLM Provider**: OpenAI (GPT-4o, text-embedding-3-small)
+- **External Search**: Tavily API
+- **Article Extraction**: Trafilatura, BeautifulSoup
+- **RSS Parsing**: feedparser
 
-```bash
-news reset --full --yes
-news reset --chunks-only --yes
-```
+## License
 
-Use `--yes` to confirm destructive action.
+MIT License - See LICENSE file for details
 
-## 7) Data locations
+## Contributing
 
-- SQLite DB: `/Users/aayushkumar/AI-FC/truth-detector/data/news.db`
-- Chroma persistence: `/Users/aayushkumar/AI-FC/truth-detector/data/chroma`
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
 
-## 7.1) What is stored where
+## Support
 
-### SQLite (`data/news.db`) stores pipeline state + metadata
-
-Tables:
-
-- `sources`  
-  Per-source configuration snapshot and health state:
-  - `source_id`, `name`, `enabled`, `fetch_interval_minutes`
-  - `last_success_at`, `last_error_at`, `last_error`
-
-- `rss_items`  
-  Feed-level ingestion queue/state:
-  - `source_id`, `guid`, `url`, `title`, `published_at`, `fetched_at`
-  - `status` (`queued` / `extracted` / `failed`)
-  - `error`
-
-- `articles`  
-  Extracted article text and dedupe metadata:
-  - `url`, `final_url`, `title`, `published_at`, `author`
-  - `text`, `extracted_at`, `text_hash`
-  - `duplicate_of_url`
-
-- `chunks`  
-  Chunked text + embedding payload/metadata:
-  - `chunk_id`, `url`, `source_id`, `title`, `published_at`, `chunk_index`
-  - `text`, `chunk_hash`, `token_count`, `created_at`
-  - `embedding` (JSON vector), `embedding_model`, `embedding_dim`, `embedding_created_at`
-  - `indexed_at`
-
-- `indexed_chunks`  
-  Index bookkeeping:
-  - `chunk_id`, `collection_name`, `indexed_at`
-
-Why SQLite:
-- system of record for ingestion
-- resumability/idempotency
-- debugging and auditability
-
-### Chroma (`data/chroma`) stores vector index for retrieval
-
-Collection (default): `news_v1`
-
-Per vector record:
-- `id`: `chunk_id`
-- `document`: chunk text
-- `embedding`: OpenAI embedding vector
-- `metadata`: `url`, `source_id`, `published_at`, `title`, `chunk_index`, `embedding_model`
-
-Why Chroma:
-- fast similarity search over embeddings during retrieval/verification
-- retrieval-optimized storage separate from ingestion state
-
-## 8) Inspect ingested data
-
-### SQLite quick checks
-
-```bash
-sqlite3 /Users/aayushkumar/AI-FC/truth-detector/data/news.db "SELECT COUNT(*) FROM rss_items;"
-sqlite3 /Users/aayushkumar/AI-FC/truth-detector/data/news.db "SELECT COUNT(*) FROM articles;"
-sqlite3 /Users/aayushkumar/AI-FC/truth-detector/data/news.db "SELECT COUNT(*) FROM chunks;"
-sqlite3 /Users/aayushkumar/AI-FC/truth-detector/data/news.db "SELECT COUNT(*) FROM indexed_chunks;"
-```
-
-### Open SQLite shell
-
-```bash
-sqlite3 /Users/aayushkumar/AI-FC/truth-detector/data/news.db
-```
-
-Inside shell:
-
-```sql
-.tables
-SELECT source_id, COUNT(*) AS c FROM rss_items GROUP BY source_id ORDER BY c DESC;
-SELECT url, title, substr(text, 1, 300) FROM articles LIMIT 5;
-SELECT chunk_id, url, chunk_index, token_count FROM chunks ORDER BY chunk_id DESC LIMIT 20;
-```
-
-### Chroma count check
-
-```bash
-cd /Users/aayushkumar/AI-FC/truth-detector
-source .venv/bin/activate
-python - <<'PY'
-import chromadb
-client = chromadb.PersistentClient(path="data/chroma")
-col = client.get_collection("news_v1")
-print("news_v1 count:", col.count())
-PY
-```
-
-### No items ingested
-
-Check:
-- source URLs are valid and enabled
-- `--since-minutes` window is not too small
-- internet connectivity / firewall
-- `OPENAI_API_KEY` is set for embedding stage
-- `news health` for per-source error messages
-
-### OpenAI key/config issues
-
-If embedding fails:
-
-- verify `OPENAI_API_KEY` is set in the same shell session
-- verify model name is valid (default: `text-embedding-3-small`)
-- if using a proxy/provider, set `--openai-base-url`
-
-### Existing data and reruns
-
-- SQLite + unique constraints prevent duplicate ingestion work
-- rerunning `news ingest` is expected and safe
-
-## 10) Typical daily workflow
-
-```bash
-cd /Users/aayushkumar/AI-FC/truth-detector
-source .venv/bin/activate
-news ingest --since-minutes 30
-news health
-```
-
-For demo prep:
-
-```bash
-news backfill --days 7
-news health
-```
-
-## 11) Reset data (clear SQLite/Chroma)
-
-Warning: these operations permanently delete ingested data.
-
-Activate env:
-
-```bash
-cd /Users/aayushkumar/AI-FC/truth-detector
-source .venv/bin/activate
-```
-
-### Option A: Full reset (start from zero)
-
-Deletes entire SQLite DB and Chroma index.
-
-```bash
-news reset --full --yes
-news health
-```
-
-After this, run ingestion again:
-
-```bash
-news ingest --since-minutes 60
-```
-
-### Option B: Reset only chunks + vectors (keep fetched RSS/articles)
-
-Keeps `sources`, `rss_items`, and `articles`, but clears chunking/embedding/indexing outputs.
-
-```bash
-news reset --chunks-only --yes
-```
-
-Then rerun from chunk/embed/index path via normal ingest:
-
-```bash
-news ingest --since-minutes 60
-```
+For issues, questions, or contributions, please open an issue on the GitHub repository.
