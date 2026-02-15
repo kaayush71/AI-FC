@@ -47,6 +47,9 @@ class VerificationResult:
     needs_external_search: bool = False
     search_rationale: str = ""
     suggested_search_query: str = ""
+    # Query enhancement fields - tracks how the claim was optimized
+    original_claim: str = ""  # Original user input before enhancement
+    enhanced_query: str = ""  # The query used for retrieval (may differ from claim)
 
 
 VERIFICATION_SYSTEM_PROMPT = """You are a rigorous fact-checker. Your job is to verify claims against provided evidence AND decide if external search is needed.

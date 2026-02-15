@@ -32,12 +32,10 @@ def _run_verify(args: argparse.Namespace) -> None:
     import sys
 
     from app.verify.analyze import Verdict, verify_claim
+    from app.verify.enhance import enhance_claim, prompt_user_clarification
     from app.verify.output import format_result, format_result_compact
     from app.verify.retrieve import retrieve_evidence
     from app.verify.search import search_and_cache
-
-    # Confidence threshold for triggering external search
-    CONFIDENCE_THRESHOLD = 60
 
     # Collect claims to verify
     claims: list[str] = []
@@ -58,16 +56,66 @@ def _run_verify(args: argparse.Namespace) -> None:
     use_color = not args.no_color and sys.stdout.isatty()
 
     for claim in claims:
-        # Step 1: Retrieve evidence from ChromaDB (internal sources)
-        evidence = retrieve_evidence(
-            claim=claim,
-            chroma_dir=args.chroma_dir,
-            collection_name=args.collection_name,
-            n_results=args.top_k,
-            model_name=args.embedding_model,
-            api_key=args.openai_api_key,
-            base_url=args.openai_base_url,
-        )
+        original_claim = claim
+        enhanced_query = claim
+        
+        # Step 0: Query Enhancement (unless disabled)
+        if not args.no_enhance:
+            enhanced = enhance_claim(
+                claim=claim,
+                api_key=args.openai_api_key,
+                base_url=args.openai_base_url,
+                model=args.verification_model,
+            )
+            
+            if enhanced.is_ambiguous:
+                # Prompt user to clarify the ambiguous claim
+                clarified = prompt_user_clarification(enhanced)
+                # Re-enhance with the clarified claim
+                enhanced = enhance_claim(
+                    claim=clarified,
+                    api_key=args.openai_api_key,
+                    base_url=args.openai_base_url,
+                    model=args.verification_model,
+                )
+            
+            # Use the primary enhanced query for retrieval
+            if enhanced.enhanced_queries:
+                enhanced_query = enhanced.enhanced_queries[0]
+                if enhanced_query != original_claim:
+                    print(f"Query enhanced: \"{enhanced_query}\"")
+            
+            # Update claim to the clarified version
+            claim = enhanced.clarified_claim
+
+        # Step 1: Retrieve evidence from ChromaDB using enhanced query
+        all_evidence = []
+        queries_to_search = [enhanced_query]
+        
+        # If we have multiple enhanced queries, search all of them
+        if not args.no_enhance and hasattr(enhanced, 'enhanced_queries') and len(enhanced.enhanced_queries) > 1:
+            queries_to_search = enhanced.enhanced_queries[:3]  # Limit to top 3 queries
+        
+        for query in queries_to_search:
+            evidence = retrieve_evidence(
+                claim=query,
+                chroma_dir=args.chroma_dir,
+                collection_name=args.collection_name,
+                n_results=args.top_k,
+                model_name=args.embedding_model,
+                api_key=args.openai_api_key,
+                base_url=args.openai_base_url,
+            )
+            all_evidence.extend(evidence)
+        
+        # Deduplicate evidence by chunk_id
+        seen_ids = set()
+        unique_evidence = []
+        for ev in all_evidence:
+            if ev.chunk_id not in seen_ids:
+                seen_ids.add(ev.chunk_id)
+                unique_evidence.append(ev)
+        evidence = unique_evidence
 
         # Step 2: First-pass verification with internal evidence only
         first_pass_result = verify_claim(
@@ -77,22 +125,26 @@ def _run_verify(args: argparse.Namespace) -> None:
             base_url=args.openai_base_url,
             model=args.verification_model,
         )
+        
+        # Add enhancement tracking to result
+        first_pass_result.original_claim = original_claim
+        first_pass_result.enhanced_query = enhanced_query
 
-        # Step 3: Check if we need external search
+        # Step 3: Check if we need external search (using agentic decision)
         needs_external = (
             not args.no_external
-            and (
-                first_pass_result.verdict == Verdict.UNVERIFIABLE
-                or first_pass_result.confidence < CONFIDENCE_THRESHOLD
-            )
+            and first_pass_result.needs_external_search
         )
 
         if needs_external:
-            print(f"First pass: {first_pass_result.verdict.value} ({first_pass_result.confidence}%) - searching external sources...")
+            # Use suggested query from agent if available, otherwise use enhanced query
+            search_query = first_pass_result.suggested_search_query or enhanced_query
+            print(f"First pass: {first_pass_result.verdict.value} ({first_pass_result.confidence}%)")
+            print(f"Agent decision: Searching external sources - {first_pass_result.search_rationale}")
 
             # Step 4: Search Tavily and cache results to ChromaDB
             external_evidence = search_and_cache(
-                claim=claim,
+                claim=search_query,
                 chroma_dir=args.chroma_dir,
                 collection_name=args.collection_name,
                 max_results=5,
@@ -112,6 +164,9 @@ def _run_verify(args: argparse.Namespace) -> None:
                     base_url=args.openai_base_url,
                     model=args.verification_model,
                 )
+                # Preserve enhancement tracking
+                result.original_claim = original_claim
+                result.enhanced_query = enhanced_query
             else:
                 # No external results found, use first pass result
                 result = first_pass_result
@@ -172,6 +227,7 @@ def main() -> None:
     verify_parser.add_argument("claim", nargs="?", help="The claim to verify")
     verify_parser.add_argument("--file", "-f", help="File with claims (one per line)")
     verify_parser.add_argument("--no-external", action="store_true", help="Disable external Tavily search")
+    verify_parser.add_argument("--no-enhance", action="store_true", help="Disable query enhancement (use raw claim)")
     verify_parser.add_argument("--top-k", type=int, default=10, help="Number of evidence chunks to retrieve")
     verify_parser.add_argument("--embedding-model", default="text-embedding-3-small")
     verify_parser.add_argument("--verification-model", default="gpt-4o", help="Model for verification")

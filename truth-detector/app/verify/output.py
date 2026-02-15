@@ -54,13 +54,23 @@ def format_result(result: VerificationResult, use_color: bool = True) -> str:
         f"{c.BOLD}CLAIM:{c.RESET} \"{result.claim}\"",
         f"{c.BOLD}{line}{c.RESET}",
         "",
+    ]
+    
+    # Show query enhancement info if the query was modified
+    if result.original_claim and result.enhanced_query and result.original_claim != result.enhanced_query:
+        lines.append(f"{c.CYAN}{c.BOLD}QUERY ENHANCEMENT:{c.RESET}")
+        lines.append(f"  {c.GRAY}Original:{c.RESET} \"{result.original_claim}\"")
+        lines.append(f"  {c.CYAN}Enhanced:{c.RESET} \"{result.enhanced_query}\"")
+        lines.append("")
+    
+    lines.extend([
         f"{c.BOLD}VERDICT:{c.RESET} {verdict_color}{verdict_symbol} {result.verdict.value}{c.RESET}"
         f"                    {c.BOLD}Confidence:{c.RESET} {result.confidence}%",
         "",
         f"{c.BOLD}REASONING:{c.RESET}",
         _wrap_text(result.reasoning, width=58, indent="  "),
         "",
-    ]
+    ])
     
     # Supporting evidence
     if result.supporting_evidence:
