@@ -11,19 +11,22 @@ dependencies = [
   "feedparser>=6.0",
   "openai>=1.0.0",
   "onnxruntime==1.23.2",
+  "pandas>=2.0.0",
   "requests>=2.32.0",
+  "streamlit>=1.30.0",
   "tavily-python>=0.3.0",
 ]
 
 [project.scripts]
 truth-news = "app.cli:main"
+truth-news-ui = "app.ui.main:run"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["app", "app.common", "app.config", "app.ingest", "app.store", "app.verify"]
+packages = ["app", "app.common", "app.config", "app.ingest", "app.store", "app.ui", "app.verify"]
 
 [tool.poetry]
 name = "truth-detector"
@@ -40,8 +43,11 @@ chromadb = ">=0.5"
 feedparser = ">=6.0"
 openai = ">=1.0.0"
 onnxruntime = "1.23.2"
+pandas = ">=2.0.0"
 requests = ">=2.32.0"
+streamlit = ">=1.30.0"
 tavily-python = ">=0.3.0"
 
 [tool.poetry.scripts]
 truth-news = "app.cli:main"
+truth-news-ui = "app.ui.main:run"
